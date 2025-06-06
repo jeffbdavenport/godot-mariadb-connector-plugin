@@ -9,7 +9,7 @@ windows.debug.x86_64 = "res://addons/godot-mariadb-connector/bin/libgd_mariadb_c
 windows.release.x86_64 = "res://addons/godot-mariadb-connector/bin/libgd_mariadb_connector.windows.release.x86_64.dll"
 
 linux.debug.x86_64 = "res://addons/godot-mariadb-connector/bin/libgd_mariadb_connector.linux.debug.x86_64.so"
-linux.release.x86_64 = "rres://addons/godot-mariadb-connector/bin/libgd_mariadb_connector.linux.release.x86_64.so"
+linux.release.x86_64 = "res://addons/godot-mariadb-connector/bin/libgd_mariadb_connector.linux.release.x86_64.so"
 
 linux.debug.arm64 = "res://addons/godot-mariadb-connector/bin/libgd_mariadb_connector.linux.debug.arm64.so"
 linux.release.arm64 = "res://addons/godot-mariadb-connector/bin/libgd_mariadb_connector.linux.release.arm64.so"
