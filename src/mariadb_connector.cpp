@@ -932,14 +932,6 @@ TypedArray<Dictionary> MariaDBConnector::_parse_string_rows(PackedByteArray &p_r
 					return TypedArray<Dictionary>();
 				}
 
-				len_encode = _decode_lenenc_adv_itr(p_rx_bfr, p_pkt_idx);
-				_last_error = _rcv_bfr_chk(p_rx_bfr, bfr_size, p_pkt_idx, len_encode);
-				if (_last_error != OK) {
-					ERR_PRINT(
-							vformat("ERR_PACKET_LENGTH_MISMATCH rcvd %d expect %d", bfr_size, p_pkt_idx + len_encode));
-					return TypedArray<Dictionary>();
-				}
-
 				if (field_len > 0) {
 					PackedByteArray data = _get_pkt_bytes_adv_idx(p_rx_bfr, p_pkt_idx, field_len);
 					dict[field_name] = _get_type_data(field_type, data);
