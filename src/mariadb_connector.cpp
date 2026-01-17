@@ -874,40 +874,61 @@ TypedArray<Dictionary> MariaDBConnector::_parse_string_rows(PackedByteArray &p_r
 		Dictionary dict;
 		// https://mariadb.com/kb/en/protocol-data-types/#length-encoded-strings
 		for (size_t col_idx = 0; col_idx < col_cnt; ++col_idx) {
-			_last_error = _rcv_bfr_chk(p_rx_bfr, bfr_size, p_pkt_idx, 2);
+			_last_error = _rcv_bfr_chk(p_rx_bfr, bfr_size, p_pkt_idx, 1);
 			if (_last_error != OK) {
-				ERR_PRINT(vformat("ERR_PACKET_LENGTH_MISMATCH rcvd %d expect %d", bfr_size, p_pkt_idx + 2));
+				ERR_PRINT(vformat("ERR_PACKET_LENGTH_MISMATCH rcvd %d expect %d", bfr_size, p_pkt_idx + 1));
 				return TypedArray<Dictionary>();
 			}
-			marker = p_rx_bfr[p_pkt_idx];
-			if (marker == 0xFF || marker == 0xFB || marker == 0x00) {
-				p_pkt_idx++;
-				// if (marker == 0xFF) // ERR_Packet
-				//
-				// if (arker == 0xFB) - LOCAL_INFILE Packet if the query was "LOCAL INFILE)
-				// if ((marker == 0x00 && !dep_eof /* && pkt_len < 0xFFFFFF */) ||
-				//  		(marker == 0xFE && pkt_len < 0xFFFFFF && dep_eof)) {
-				//  	//OK_Packet
-				//  	done = true;
-				//  	break;
-				//  }
+			marker = p_rx_bfr[p_pkt_idx++];
+
+			bool valid = false;
+			String field_name = String(p_col_defs[col_idx].get("name", &valid));
+			ERR_FAIL_COND_V_EDMSG(!valid, TypedArray<Dictionary>(), 
+														vformat("ERROR: 'name' key missing at col %d", col_idx));
+			int64_t field_type = int64_t(p_col_defs[col_idx].get("field_type", &valid));
+			if (!valid) {
+				dict[field_name] = Variant();
+				continue;
+			}
+			if (marker == 0xFB) {
+				dict[field_name] = Variant();
+			} else if (marker == 0x00) {
+				dict[field_name] = "";
+			} else if (marker == 0xFF) {
+				ERR_PRINT("Unexpected ERR marker in row data");
+				dict[field_name] = Variant();
 			} else {
-				if (marker == 0xFE) {
-					// if (marker == 0xFE && pkt_len < 0xFFFFFF && !p_dep_eof){
-					// EOF PACKET
-					// is this possible in COM_QUERY??
-					// }
-					len_encode = 8;
-				} else if (marker == 0xFD) {
-					len_encode = 3;
+				uint64_t field_len = 0;
+	
+				if (marker < 0xFC) {
+					field_len = marker;
 				} else if (marker == 0xFC) {
-					len_encode = 2;
+					if (p_pkt_idx + 2 > p_rx_bfr.size()) return TypedArray<Dictionary>();
+					field_len = p_rx_bfr[p_pkt_idx++];
+					field_len |= (uint64_t)p_rx_bfr[p_pkt_idx++] << 8;
+				} else if (marker == 0xFD) {
+					if (p_pkt_idx + 3 > p_rx_bfr.size()) return TypedArray<Dictionary>();
+					field_len = p_rx_bfr[p_pkt_idx++];
+					field_len |= (uint64_t)p_rx_bfr[p_pkt_idx++] << 8;
+					field_len |= (uint64_t)p_rx_bfr[p_pkt_idx++] << 16;
+				} else if (marker == 0xFE) {
+					if (p_pkt_idx + 8 > p_rx_bfr.size()) return TypedArray<Dictionary>();
+					uint64_t low = p_rx_bfr[p_pkt_idx++];
+					low |= (uint64_t)p_rx_bfr[p_pkt_idx++] << 8;
+					low |= (uint64_t)p_rx_bfr[p_pkt_idx++] << 16;
+					low |= (uint64_t)p_rx_bfr[p_pkt_idx++] << 24;
+					uint64_t high = p_rx_bfr[p_pkt_idx++];
+					high |= (uint64_t)p_rx_bfr[p_pkt_idx++] << 8;
+					high |= (uint64_t)p_rx_bfr[p_pkt_idx++] << 16;
+					high |= (uint64_t)p_rx_bfr[p_pkt_idx++] << 24;
+					field_len = (high << 32) | low;
 				}
 
-				_last_error = _rcv_bfr_chk(p_rx_bfr, bfr_size, p_pkt_idx, len_encode);
+				_last_error = _rcv_bfr_chk(p_rx_bfr, bfr_size, p_pkt_idx, field_len);
 				if (_last_error != OK) {
 					ERR_PRINT(
-							vformat("ERR_PACKET_LENGTH_MISMATCH rcvd %d expect %d", bfr_size, p_pkt_idx + len_encode));
+						vformat("ERR_PACKET_LENGTH_MISMATCH rcvd %d expect %d (data col %d)", 
+							bfr_size, p_pkt_idx + field_len, col_idx));
 					return TypedArray<Dictionary>();
 				}
 
@@ -918,32 +939,17 @@ TypedArray<Dictionary> MariaDBConnector::_parse_string_rows(PackedByteArray &p_r
 							vformat("ERR_PACKET_LENGTH_MISMATCH rcvd %d expect %d", bfr_size, p_pkt_idx + len_encode));
 					return TypedArray<Dictionary>();
 				}
-				bool valid = false;
 
-				// NOTE when accessing Dictionaries in C++ you must assign the value to
-				// the expected type or you get undefined and erratic  behavior
-				String field_name = String(p_col_defs[col_idx].get("name", &valid));
-				ERR_FAIL_COND_V_EDMSG(
-						!valid, TypedArray<Dictionary>(), vformat("ERROR: 'name' key is missing at index %d", col_idx));
-
-				if (len_encode > 0) {
-					PackedByteArray data = _get_pkt_bytes_adv_idx(p_rx_bfr, p_pkt_idx, len_encode);
-
-					valid = false;
-					int64_t field_type = int64_t(p_col_defs[col_idx].get("field_type", &valid));
-
-					if (!valid) {
-						dict[field_name] = Variant();  // Store empty if missing
-					} else {
-						dict[field_name] = _get_type_data(field_type, data);
-					}
+				if (field_len > 0) {
+					PackedByteArray data = _get_pkt_bytes_adv_idx(p_rx_bfr, p_pkt_idx, field_len);
+					dict[field_name] = _get_type_data(field_type, data);
 				} else {
-					dict[field_name] = Variant();
+					dict[field_name] = "";
 				}
 			}
 		}
 
-		if (!done) rows.push_back(dict);
+ 	rows.push_back(dict);  // Push the completed row after all columns
 	}
 
 	return rows;
